@@ -1,0 +1,11 @@
+{
+  "$id": "lcm.v3.input",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "user_message": { "type": "string", "maxLength": 500 },
+    "facts": { "type": "object" },
+    "intent_hint": { "type": "string" }
+  },
+  "required": ["user_message"]
+}

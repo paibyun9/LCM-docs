@@ -1,0 +1,15 @@
+{
+  "$id": "lcm.v3.output",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "judgement": { "type": "string" },
+    "message": { "type": "string" },
+    "next_actions": {
+      "type": "array",
+      "maxItems": 2
+    },
+    "disclosure": { "type": "string" }
+  },
+  "required": ["judgement", "message", "next_actions", "disclosure"]
+}
