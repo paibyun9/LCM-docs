@@ -1,0 +1,402 @@
+{
+  "model": "LCM_V3_ConversationStateMachine",
+  "version": "v0.2",
+  "domain": "refund_return",
+  "non_negotiable": {
+    "principle": "Guidance-only. No execution/approval on behalf of user.",
+    "disclosure": {
+      "ko": "(※ 안내만 가능하며, 실제 환불/반품은 해당 플랫폼에서 직접 진행하셔야 합니다.)",
+      "en": "(※ Guidance only. You must submit the return/refund request directly on the platform.)"
+    }
+  },
+  "ui_labels": {
+    "category_label": {
+      "apparel": { "ko": "의류", "en": "Apparel" },
+      "electronics": { "ko": "전자제품", "en": "Electronics" },
+      "used_electronics": { "ko": "중고 전자제품", "en": "Used electronics" }
+    }
+  },
+  "entities": {
+    "merchant": { "type": "string", "examples": ["Amazon", "Coupang", "Apple"] },
+    "item": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string", "examples": ["apparel", "electronics", "used_electronics"] },
+        "condition": { "type": "string", "examples": ["new", "used", "refurbished"] }
+      }
+    },
+    "facts": {
+      "type": "object",
+      "properties": {
+        "purchase_date": { "type": "string", "format": "date" },
+        "delivery_date": { "type": "string", "format": "date" },
+        "days_since_purchase": { "type": "integer" },
+        "unopened": { "type": "boolean" },
+        "unused": { "type": "boolean" },
+        "tag_attached": { "type": "boolean" },
+        "issue_type": { "type": "string", "examples": ["size_mismatch", "defect", "not_as_described"] },
+        "damage_detail": { "type": "string" },
+        "evidence_photos_available": { "type": "boolean" }
+      }
+    },
+    "identifiers": {
+      "type": "object",
+      "properties": {
+        "order_id": { "type": "string" },
+        "product_id": { "type": "string" }
+      }
+    }
+  },
+  "states": [
+    {
+      "id": "S0_INTENT_CAPTURE",
+      "type": "input",
+      "purpose": "Detect refund/return intent and capture platform/item category.",
+      "required": ["merchant", "item.category"],
+      "transitions": [
+        { "on": "intent_identified", "to": "S1_MIN_FACTS_REQUEST", "set": { "context.flow": "refund_return" } }
+      ]
+    },
+    {
+      "id": "S1_MIN_FACTS_REQUEST",
+      "type": "ask",
+      "purpose": "Ask only the minimum facts needed for a concrete eligibility judgment (no generalities).",
+      "ask_map_by_category": {
+        "apparel": ["facts.delivery_date|facts.purchase_date", "facts.tag_attached"],
+        "electronics": ["facts.purchase_date", "facts.unopened|facts.unused"],
+        "used_electronics": ["facts.purchase_date", "facts.issue_type", "facts.damage_detail|facts.evidence_photos_available"]
+      },
+      "output_templates": {
+        "ko": {
+          "compact": {
+            "text": [
+              "{ui.category_label[item.category].ko} 환불·반품 안내를 도와드립니다.",
+              "",
+              "정확한 판단을 위해 아래 정보만 알려주세요:",
+              "{dynamic_bullets}",
+              "",
+              "확인되는 즉시 가능 여부를 판단해 드리겠습니다.",
+              "{non_negotiable.disclosure.ko}"
+            ]
+          }
+        },
+        "en": {
+          "compact": {
+            "text": [
+              "I can help with {ui.category_label[item.category].en} refund/return guidance.",
+              "",
+              "To make an accurate decision, please share only the following:",
+              "{dynamic_bullets}",
+              "",
+              "Once confirmed, I’ll determine eligibility right away.",
+              "{non_negotiable.disclosure.en}"
+            ]
+          }
+        }
+      },
+      "transitions": [
+        { "on": "facts_provided", "to": "S2_ELIGIBILITY_EVALUATE" },
+        { "on": "input_ambiguous", "to": "S_ERROR_HANDLING" }
+      ]
+    },
+    {
+      "id": "S_ERROR_HANDLING",
+      "type": "recovery",
+      "purpose": "Handle ambiguous or insufficient inputs gracefully and route back to minimal facts collection.",
+      "output_templates": {
+        "ko": {
+          "text": [
+            "확인을 위해 더 구체적인 정보가 필요합니다.",
+            "예: \"구매일은 4월 1일이고, 미개봉 상태예요\"",
+            "",
+            "아래 정보 중 해당되는 것만 다시 알려주시겠어요?",
+            "{dynamic_bullets}",
+            "",
+            "{non_negotiable.disclosure.ko}"
+          ]
+        },
+        "en": {
+          "text": [
+            "I’ll need a bit more specific information to confirm this.",
+            "Example: \"I bought it on Apr 1 and it’s unopened.\"",
+            "",
+            "Could you re-share only what applies from the list below?",
+            "{dynamic_bullets}",
+            "",
+            "{non_negotiable.disclosure.en}"
+          ]
+        }
+      },
+      "transitions": [
+        { "on": "facts_provided", "to": "S2_ELIGIBILITY_EVALUATE" },
+        { "on": "still_ambiguous", "to": "S1_MIN_FACTS_REQUEST" }
+      ]
+    },
+    {
+      "id": "S2_ELIGIBILITY_EVALUATE",
+      "type": "decision",
+      "purpose": "Evaluate eligibility using plugin policy verdicts (Core never interprets policy text; it consumes verdicts).",
+      "inputs": ["merchant", "item", "facts", "identifiers"],
+      "plugin_calls": [
+        {
+          "name": "policy_verdict",
+          "contract": {
+            "input": ["merchant", "item.category", "facts"],
+            "output": [
+              "verdict: POSSIBLE | NOT_POSSIBLE | NEED_MORE_INFO",
+              "reason_code: string",
+              "key_criteria: string[]"
+            ]
+          }
+        }
+      ],
+      "transitions": [
+        { "on": "verdict=NEED_MORE_INFO", "to": "S_ERROR_HANDLING" },
+        { "on": "verdict=POSSIBLE", "to": "S3A_POSSIBLE_NEXT_ACTION" },
+        { "on": "verdict=NOT_POSSIBLE", "to": "S3B_NOT_POSSIBLE_ALTERNATIVES" }
+      ]
+    },
+    {
+      "id": "S3A_POSSIBLE_NEXT_ACTION",
+      "type": "offer",
+      "purpose": "Eligibility is positive; present 2 executable next steps (compact, action-led).",
+      "output_templates": {
+        "ko": {
+          "compact": {
+            "text": [
+              "{key_criteria_summary}로 확인되어 환불·반품 가능합니다.",
+              "",
+              "다음 단계를 선택해 주세요:",
+              "1. {merchant} 공식 환불·반품 절차 안내",
+              "2. 판매자 요청 문장 작성 도움",
+              "",
+              "{non_negotiable.disclosure.ko}"
+            ]
+          }
+        },
+        "en": {
+          "compact": {
+            "text": [
+              "Confirmed based on {key_criteria_summary}: your refund/return looks eligible.",
+              "",
+              "Choose the next step:",
+              "1. Guide me through the official {merchant} flow",
+              "2. Help me draft a seller message",
+              "",
+              "{non_negotiable.disclosure.en}"
+            ]
+          }
+        }
+      },
+      "transitions": [
+        { "on": "user_choice=1", "to": "S4A_ROUTE_TO_OFFICIAL_FLOW" },
+        { "on": "user_choice=2", "to": "S4B_DRAFT_SELLER_MESSAGE" }
+      ]
+    },
+    {
+      "id": "S3B_NOT_POSSIBLE_ALTERNATIVES",
+      "type": "offer",
+      "purpose": "Eligibility negative; provide constructive alternatives (action-led).",
+      "output_templates": {
+        "ko": {
+          "text": [
+            "{key_criteria_summary} 기준에 따라 이번 요청은 처리할 수 없습니다.",
+            "",
+            "대신 다음 중 선택해 주세요:",
+            "1. 판매자에게 예외 요청 문장 작성",
+            "2. 교환 가능 여부 확인",
+            "3. 공식 문의/분쟁 경로 안내",
+            "",
+            "{non_negotiable.disclosure.ko}"
+          ]
+        },
+        "en": {
+          "text": [
+            "Based on {key_criteria_summary}, this request can’t be processed as a refund/return.",
+            "",
+            "Choose an alternative:",
+            "1. Draft an exception request to the seller",
+            "2. Check exchange eligibility",
+            "3. Guide me to the official dispute/contact path",
+            "",
+            "{non_negotiable.disclosure.en}"
+          ]
+        }
+      },
+      "transitions": [
+        { "on": "user_choice=1", "to": "S4B_DRAFT_SELLER_MESSAGE" },
+        { "on": "user_choice=2", "to": "S4C_CHECK_EXCHANGE" },
+        { "on": "user_choice=3", "to": "S4D_DISPUTE_PATH" }
+      ]
+    },
+    {
+      "id": "S4A_ROUTE_TO_OFFICIAL_FLOW",
+      "type": "ask_or_action",
+      "purpose": "If user wants official flow guidance, request identifiers only if needed; then guide.",
+      "guard": {
+        "if_missing": ["identifiers.order_id|item.name"],
+        "then": "ASK_FOR_ID",
+        "else": "PROVIDE_STEPS"
+      },
+      "output_templates": {
+        "ko": {
+          "ASK_FOR_ID": {
+            "text": [
+              "공식 절차 안내를 진행하겠습니다.",
+              "",
+              "정확한 안내를 위해 상품명 또는 주문 번호를 알려주시겠어요?",
+              "확인 후 공식 환불·반품 경로로 안내해 드리겠습니다.",
+              "",
+              "{non_negotiable.disclosure.ko}"
+            ]
+          },
+          "PROVIDE_STEPS": {
+            "text": [
+              "좋습니다. {merchant} 공식 환불·반품 절차는 아래 순서로 진행됩니다:",
+              "1. 주문 내역에서 해당 상품 선택",
+              "2. 사유 선택",
+              "3. 처리 방식 확인 후 제출",
+              "",
+              "원하시면 지금 진행할 수 있도록 공식 경로를 안내해 드리겠습니다.",
+              "{non_negotiable.disclosure.ko}"
+            ]
+          }
+        },
+        "en": {
+          "ASK_FOR_ID": {
+            "text": [
+              "Got it — I’ll guide you through the official flow.",
+              "",
+              "To be precise, can you share the item name or order ID?",
+              "Then I’ll point you to the correct official path.",
+              "",
+              "{non_negotiable.disclosure.en}"
+            ]
+          },
+          "PROVIDE_STEPS": {
+            "text": [
+              "Great — the official {merchant} flow is typically:",
+              "1. Open your Orders and select the item",
+              "2. Choose a reason",
+              "3. Confirm the method and submit",
+              "",
+              "If you want, I can guide you to the official path to proceed.",
+              "{non_negotiable.disclosure.en}"
+            ]
+          }
+        }
+      },
+      "transitions": [
+        { "on": "id_provided", "to": "S4A_ROUTE_TO_OFFICIAL_FLOW", "effect": "re-evaluate guard" },
+        { "on": "completed", "to": "S5_DONE" }
+      ]
+    },
+    {
+      "id": "S4B_DRAFT_SELLER_MESSAGE",
+      "type": "action",
+      "purpose": "Generate a seller message draft using captured facts; do not claim policy authority.",
+      "required": ["merchant", "item.name", "facts.purchase_date|facts.delivery_date"],
+      "output_templates": {
+        "ko": {
+          "text": [
+            "좋습니다. 판매자에게 보낼 요청 문장을 작성해 드리겠습니다.",
+            "",
+            "[요청 문장 초안]",
+            "{seller_message_draft}",
+            "",
+            "{non_negotiable.disclosure.ko}"
+          ]
+        },
+        "en": {
+          "text": [
+            "Okay — I’ll draft a message to the seller.",
+            "",
+            "[Draft]",
+            "{seller_message_draft}",
+            "",
+            "{non_negotiable.disclosure.en}"
+          ]
+        }
+      },
+      "transitions": [
+        { "on": "completed", "to": "S5_DONE" }
+      ]
+    },
+    {
+      "id": "S4C_CHECK_EXCHANGE",
+      "type": "ask_or_action",
+      "purpose": "If refund not possible, check exchange feasibility with minimal extra facts.",
+      "ask": ["facts.issue_type", "facts.delivery_date|facts.purchase_date"],
+      "output_templates": {
+        "ko": {
+          "text": [
+            "교환 가능 여부를 확인해 드리겠습니다.",
+            "사유와 수령일(또는 구매일)을 알려주시면 바로 판단해 드릴게요.",
+            "{non_negotiable.disclosure.ko}"
+          ]
+        },
+        "en": {
+          "text": [
+            "I can check exchange eligibility.",
+            "Share the reason and delivery/purchase date, and I’ll assess it right away.",
+            "{non_negotiable.disclosure.en}"
+          ]
+        }
+      },
+      "transitions": [
+        { "on": "facts_provided", "to": "S2_ELIGIBILITY_EVALUATE" }
+      ]
+    },
+    {
+      "id": "S4D_DISPUTE_PATH",
+      "type": "action",
+      "purpose": "Provide official dispute/contact path guidance; prioritize evidence for not-as-described cases.",
+      "output_templates": {
+        "ko": {
+          "text": [
+            "공식 문의/분쟁 경로를 안내해 드리겠습니다.",
+            "가능하면 상품 상태 사진과 판매 설명 캡처를 준비해 주세요.",
+            "준비되면 공식 경로로 접수하는 절차를 안내해 드리겠습니다.",
+            "{non_negotiable.disclosure.ko}"
+          ]
+        },
+        "en": {
+          "text": [
+            "I’ll guide you to the official dispute/contact path.",
+            "If possible, prepare photos of the item condition and a screenshot of the listing description.",
+            "Once ready, I’ll guide you through submitting via the official channel.",
+            "{non_negotiable.disclosure.en}"
+          ]
+        }
+      },
+      "transitions": [
+        { "on": "completed", "to": "S5_DONE" }
+      ]
+    },
+    {
+      "id": "S5_DONE",
+      "type": "terminal",
+      "purpose": "Close with a clear next prompt.",
+      "output_templates": {
+        "ko": {
+          "text": [
+            "원하시면 다음 단계(공식 절차 안내 / 요청 문장 작성)를 계속 진행하겠습니다.",
+            "어느 쪽으로 진행할까요?"
+          ]
+        },
+        "en": {
+          "text": [
+            "If you’d like, we can continue with the next step (official flow guidance / seller message draft).",
+            "Which would you like to proceed with?"
+          ]
+        }
+      }
+    }
+  ],
+  "ui_contract": {
+    "system_awareness": { "show_state": true, "show_why_compact": true, "never_show_gates": true },
+    "error_prevention": { "disallow_ambiguous_fields": ["facts.used"], "prefer_fields": ["facts.tag_attached", "facts.unopened", "facts.unused"] },
+    "copy_style": { "no_generalities": true, "no_policy_jargon": true, "action_first": true, "max_choices": 2, "fallback_choices_max": 3 }
+  }
+}
