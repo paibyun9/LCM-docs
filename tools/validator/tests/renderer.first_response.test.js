@@ -74,3 +74,43 @@ test("rejects gate word leak", () => {
     })
   ).toThrow();
 });
+
+test("template_path override works (domain-agnostic rendering)", () => {
+  const fs = require("fs");
+  const path = require("path");
+
+  const tmp = path.resolve(__dirname, "tmp.first_response.template.json");
+  fs.writeFileSync(tmp, JSON.stringify({
+    version: "tmp",
+    copy: {
+      ko: {
+        state_declaration: { S1_MIN_FACTS_REQUEST: "TMP:{category} OK", S2_PRESENT_CHOICES: "TMP:{category} CHOOSE" },
+        facts_intro: "TMP_INTRO",
+        facts_outro: "TMP_OUTRO",
+        choices_intro: "TMP_CHOICES",
+        choice_line: "{n}) {title}",
+        wait_prompt: "TMP_WAIT {hint}"
+      },
+      en: {
+        state_declaration: { S1_MIN_FACTS_REQUEST: "TMP:{category} OK", S2_PRESENT_CHOICES: "TMP:{category} CHOOSE" },
+        facts_intro: "TMP_INTRO",
+        facts_outro: "TMP_OUTRO",
+        choices_intro: "TMP_CHOICES",
+        choice_line: "{n}) {title}",
+        wait_prompt: "TMP_WAIT {hint}"
+      }
+    }
+  }, null, 2));
+
+  const out = renderFirstResponse({
+    lang: "ko",
+    state_id: "S1_MIN_FACTS_REQUEST",
+    category_text: "의류",
+    facts_required: [{ key: "received_date", ko: "수령일", en: "Delivery date" }],
+    template_path: tmp
+  });
+
+  expect(out.text).toContain("TMP:의류 OK");
+  expect(out.text).toContain("TMP_INTRO");
+  expect(out.text).toContain("TMP_WAIT");
+});

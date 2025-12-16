@@ -1,0 +1,27 @@
+{
+  "version": "first_response.v1",
+  "copy": {
+    "ko": {
+      "state_declaration": {
+        "S1_MIN_FACTS_REQUEST": "{category} 환불·반품을 도와드리겠습니다.",
+        "S2_PRESENT_CHOICES": "{category} 환불·반품 진행 방식을 선택해 주세요."
+      },
+      "facts_intro": "정확한 판단을 위해 아래만 알려주세요:",
+      "facts_outro": "확인되는 즉시 가능 여부를 판단해 드리겠습니다.",
+      "choices_intro": "다음 중 하나를 선택해 주세요:",
+      "choice_line": "{n}. {title}",
+      "wait_prompt": "준비되시면 {hint} 알려주세요."
+    },
+    "en": {
+      "state_declaration": {
+        "S1_MIN_FACTS_REQUEST": "I can help with {category} refunds/returns.",
+        "S2_PRESENT_CHOICES": "Choose how you'd like to proceed for {category}."
+      },
+      "facts_intro": "To make an accurate decision, please share only:",
+      "facts_outro": "Once confirmed, I’ll determine eligibility right away.",
+      "choices_intro": "Please choose one option:",
+      "choice_line": "{n}. {title}",
+      "wait_prompt": "When ready, please provide {hint}."
+    }
+  }
+}
