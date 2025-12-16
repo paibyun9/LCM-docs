@@ -1,48 +1,25 @@
 // lcm-server/renderer/first_response_renderer.js
 // Day-4: First Response Rendering Engine (Step 3)
 // Rule: state-driven, domain-agnostic, deterministic, no generalities, no gate words.
-// Output = 4-Step Golden Sequence:
-// 1) State declaration + empathy-lite (no fluff)
-// 2) Minimal facts OR structured choices (state-driven)
-// 3) Non-negotiable disclosure (always)
-// 4) Wait / next prompt
 
-const KO_STATE_DECLARATIONS = {
-  S1_MIN_FACTS_REQUEST: "{category} 환불·반품을 도와드리겠습니다.",
-  S2_PRESENT_CHOICES: "{category} 환불·반품 진행 방식을 선택해 주세요.",
-  S_ERROR_HANDLING: "확인을 위해 더 구체적인 정보가 필요합니다."
-};
-
-const EN_STATE_DECLARATIONS = {
-  S1_MIN_FACTS_REQUEST: "I can help with {category} refunds/returns.",
-  S2_PRESENT_CHOICES: "Please choose how you'd like to proceed for this {category} refund/return.",
-  S_ERROR_HANDLING: "I need a bit more specific information to verify."
-};
-
-const DISCLOSURE = {
+const DEFAULT_DISCLOSURE = {
   ko: "(※ 안내만 가능하며, 실제 환불/반품은 해당 플랫폼에서 직접 진행하셔야 합니다.)",
   en: "(※ Guidance only. You must submit the return/refund request directly on the platform.)"
 };
 
-// ---- Guards (헌법 기반) ----
+const KO_STATE_DECLARATIONS = {
+  S1_MIN_FACTS_REQUEST: "{category} 환불·반품을 도와드리겠습니다.",
+  S2_PRESENT_CHOICES: "{category} 환불·반품 진행 방식을 선택해 주세요."
+};
 
-function assertNoGateWords(text) {
-  const banned = [/gate\s*\d*/i, /게이트/];
-  for (const rx of banned) {
-    if (rx.test(text)) throw new Error("Gate word leak detected");
-  }
+const EN_STATE_DECLARATIONS = {
+  S1_MIN_FACTS_REQUEST: "I can help with your {category} refund/return.",
+  S2_PRESENT_CHOICES: "Please choose how you'd like to proceed with your {category} refund/return."
+};
+
+function normalizeLang(lang) {
+  return lang === "en" ? "en" : "ko";
 }
-
-// “일반론/정책용어”를 최소 수준으로만 막는다 (지나친 필터링 금지)
-function assertNoGeneralities(text) {
-  // 예: "보통", "대체로", "일반적으로" 같은 말은 LCM 스타일 위반
-  const banned = [/보통/g, /대체로/g, /일반적으로/g, /generally/gi, /usually/gi];
-  for (const rx of banned) {
-    if (rx.test(text)) throw new Error("Generality detected");
-  }
-}
-
-// ---- Core renderers ----
 
 function renderStateDeclaration({ lang, state_id, category }) {
   const map = lang === "en" ? EN_STATE_DECLARATIONS : KO_STATE_DECLARATIONS;
@@ -51,132 +28,129 @@ function renderStateDeclaration({ lang, state_id, category }) {
   return tpl.replace("{category}", category);
 }
 
+function assertNoGateWords(text) {
+  const banned = [/gate\s*\d*/i, /게이트/];
+  for (const rx of banned) {
+    if (rx.test(text)) throw new Error("Gate word leak detected");
+  }
+}
+
+function assertMaxChoices(choices, max) {
+  if (!Array.isArray(choices)) throw new Error("choices must be an array");
+  if (choices.length > max) throw new Error(`choices must be <= ${max}`);
+}
+
 function renderFactsRequest({ lang, facts }) {
   // facts: [{ key, ko, en }]
   if (!Array.isArray(facts) || facts.length === 0) {
     throw new Error("facts_required must be a non-empty array in S1_MIN_FACTS_REQUEST");
   }
 
+  const lines = [];
   if (lang === "en") {
-    return [
-      "To verify, please share only:",
-      ...facts.map((f) => `• ${f.en}`),
-      "Once confirmed, I’ll 판단 and propose the next step."
-    ];
+    lines.push("To make a precise decision, please share only:");
+    for (const f of facts) lines.push(`• ${f.en}`);
+    lines.push("Once confirmed, I’ll tell you whether it’s eligible.");
+  } else {
+    lines.push("정확한 판단을 위해 아래만 알려주세요:");
+    for (const f of facts) lines.push(`• ${f.ko}`);
+    lines.push("확인되는 즉시 가능 여부를 판단해 드리겠습니다.");
   }
-
-  return [
-    "정확한 판단을 위해 아래만 알려주세요:",
-    ...facts.map((f) => `• ${f.ko}`),
-    "확인되는 즉시 가능 여부를 판단해 드리겠습니다."
-  ];
-}
-
-function normalizeChoices({ choices, max = 2 }) {
-  // Day-4 헌법/validator 기준: choices는 최대 2개 (과다 선택지 금지)
-  if (!Array.isArray(choices) || choices.length === 0) {
-    throw new Error("choices must be a non-empty array in S2_PRESENT_CHOICES");
-  }
-  if (choices.length > max) throw new Error("choices > 2 not allowed in Day-4 renderer");
-  return choices;
+  return lines.join("\n");
 }
 
 function renderChoices({ lang, choices }) {
-  const c = normalizeChoices({ choices, max: 2 });
-
-  if (lang === "en") {
-    return [
-      "Choose one:",
-      ...c.map((x, i) => `${i + 1}. ${x.title}`),
-      "Reply with 1 or 2."
-    ];
-  }
-
-  return [
-    "다음 중 하나를 선택해 주세요:",
-    ...c.map((x, i) => `${i + 1}. ${x.title}`),
-    "원하시는 번호(1 또는 2)를 알려주세요."
-  ];
-}
-
-function renderErrorHandling({ lang }) {
-  if (lang === "en") {
-    return [
-      "Example: “I bought it on Apr 1 and it’s unopened.”",
-      "Please tell me again in that format."
-    ];
-  }
-  return [
-    "예: “구매일은 4월 1일이고, 아직 개봉 안 했어요”",
-    "이 형식으로 다시 알려주시겠어요?"
-  ];
-}
-
-function renderWait({ lang, state_id }) {
-  // 상태에 따라 대기 문장만 아주 미세 조정
-  if (lang === "en") {
-    if (state_id === "S1_MIN_FACTS_REQUEST") return ["When you're ready, reply with those details."];
-    if (state_id === "S2_PRESENT_CHOICES") return ["When you're ready, reply with 1 or 2."];
-    return ["When you're ready, reply with the details."];
-  }
-  if (state_id === "S1_MIN_FACTS_REQUEST") return ["준비되시면 위 정보를 알려주세요."];
-  if (state_id === "S2_PRESENT_CHOICES") return ["준비되시면 번호(1 또는 2)를 알려주세요."];
-  return ["준비되시면 정보를 알려주세요."];
-}
-
-// ---- Golden Sequence orchestrator ----
-
-function renderGoldenSequence(input) {
-  const { lang, state_id, category_text } = input;
-  const category = category_text || (lang === "en" ? "this item" : "해당 상품");
+  assertMaxChoices(choices, 2);
 
   const lines = [];
+  if (lang === "en") {
+    lines.push("Please choose one:");
+  } else {
+    lines.push("다음 중 하나를 선택해 주세요:");
+  }
 
-  // Step 1 — state declaration
-  lines.push(renderStateDeclaration({ lang, state_id, category }));
-  lines.push("");
+  choices.forEach((c, idx) => {
+    lines.push(`${idx + 1}. ${c.title}`);
+  });
 
-  // Step 2 — state-driven body
+  if (lang === "en") {
+    lines.push("Reply with 1 or 2.");
+  } else {
+    lines.push("원하시는 번호(1 또는 2)를 알려주세요.");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Step 3 핵심:
+ * - 모든 출력의 "마지막 줄"을 엔진 규칙으로 강제한다.
+ * - state_id에 따라 wait prompt 문구를 결정한다.
+ */
+function renderWaitPrompt({ lang, state_id }) {
+  const KO = {
+    S1_MIN_FACTS_REQUEST: "준비되시면 위 정보를 알려주세요.",
+    S2_PRESENT_CHOICES: "준비되시면 번호(1 또는 2)를 알려주세요."
+  };
+  const EN = {
+    S1_MIN_FACTS_REQUEST: "When you're ready, please share the details above.",
+    S2_PRESENT_CHOICES: "When you're ready, reply with 1 or 2."
+  };
+
+  const map = lang === "en" ? EN : KO;
+  const text = map[state_id];
+  if (!text) throw new Error(`No wait prompt for ${state_id}`);
+  return text;
+}
+
+function renderGoldenSequence({ lang, state_id, category_text, facts_required, choices, disclosure }) {
+  const category = category_text || (lang === "en" ? "Item" : "상품");
+  const out = [];
+
+  // Step 1 — State Declaration
+  out.push(renderStateDeclaration({ lang, state_id, category }));
+
+  // Step 2 — Facts request OR Choices
   if (state_id === "S1_MIN_FACTS_REQUEST") {
-    lines.push(...renderFactsRequest({ lang, facts: input.facts_required }));
+    out.push(renderFactsRequest({ lang, facts: facts_required }));
   } else if (state_id === "S2_PRESENT_CHOICES") {
-    lines.push(...renderChoices({ lang, choices: input.choices }));
-  } else if (state_id === "S_ERROR_HANDLING") {
-    lines.push(...renderErrorHandling({ lang }));
+    out.push(renderChoices({ lang, choices }));
   } else {
     throw new Error(`Unsupported state_id: ${state_id}`);
   }
 
-  // Step 3 — disclosure (always)
-  lines.push("");
-  lines.push(DISCLOSURE[lang] || DISCLOSURE.ko);
+  // Step 3 — Non-Negotiable disclosure (always present)
+  const d = disclosure || DEFAULT_DISCLOSURE[lang];
+  out.push(d);
 
-  // Step 4 — wait
-  lines.push(...renderWait({ lang, state_id }));
+  // Step 4 — Wait prompt (always last line, rule-enforced)
+  out.push(renderWaitPrompt({ lang, state_id }));
 
-  const text = lines.join("\n").trim();
+  const text = out.join("\n");
 
-  // Guards
+  // Safety checks
   assertNoGateWords(text);
-  assertNoGeneralities(text);
+
+  return text;
+}
+
+function renderFirstResponse(input) {
+  const lang = normalizeLang(input.lang);
+  const state_id = input.state_id;
+
+  const text = renderGoldenSequence({
+    lang,
+    state_id,
+    category_text: input.category_text,
+    facts_required: input.facts_required,
+    choices: input.choices,
+    disclosure: input.disclosure
+  });
 
   return { text, state_id, lang };
 }
 
-// Backward compatible API name
-function renderFirstResponse(input) {
-  return renderGoldenSequence(input);
-}
-
 module.exports = {
   renderFirstResponse,
-  renderGoldenSequence,
-  _internal: {
-    renderStateDeclaration,
-    renderFactsRequest,
-    renderChoices,
-    normalizeChoices,
-    assertNoGateWords,
-    assertNoGeneralities
-  }
+  _internal: { renderStateDeclaration, renderWaitPrompt, assertNoGateWords }
 };
