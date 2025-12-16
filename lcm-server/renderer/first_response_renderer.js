@@ -1,81 +1,48 @@
 // lcm-server/renderer/first_response_renderer.js
-// Day-4: First Response Rendering Engine (Step 1 + Step 2)
+// Day-4: First Response Rendering Engine (Step 3)
 // Rule: state-driven, domain-agnostic, deterministic, no generalities, no gate words.
+// Output = 4-Step Golden Sequence:
+// 1) State declaration + empathy-lite (no fluff)
+// 2) Minimal facts OR structured choices (state-driven)
+// 3) Non-negotiable disclosure (always)
+// 4) Wait / next prompt
 
-"use strict";
-
-// -----------------------------
-// Step 1) State declarations
-// -----------------------------
 const KO_STATE_DECLARATIONS = {
   S1_MIN_FACTS_REQUEST: "{category} 환불·반품을 도와드리겠습니다.",
-  S2_PRESENT_CHOICES: "확인 결과를 바탕으로, 다음 단계 중 하나로 진행할 수 있습니다."
+  S2_PRESENT_CHOICES: "{category} 환불·반품 진행 방식을 선택해 주세요.",
+  S_ERROR_HANDLING: "확인을 위해 더 구체적인 정보가 필요합니다."
 };
 
 const EN_STATE_DECLARATIONS = {
-  S1_MIN_FACTS_REQUEST: "I can help you with {category} returns/refunds.",
-  S2_PRESENT_CHOICES: "Based on what we’ve confirmed, we can proceed with one of the following next steps."
+  S1_MIN_FACTS_REQUEST: "I can help with {category} refunds/returns.",
+  S2_PRESENT_CHOICES: "Please choose how you'd like to proceed for this {category} refund/return.",
+  S_ERROR_HANDLING: "I need a bit more specific information to verify."
 };
 
-// -----------------------------
-// Step 2) Domain-agnostic templates
-// -----------------------------
-function renderFirstResponse(input) {
-  const lang = input?.lang === "en" ? "en" : "ko";
-  const state_id = input?.state_id;
-  const category = input?.category_text || (lang === "en" ? "this item" : "해당 상품");
-  const disclosure =
-    input?.disclosure ||
-    (lang === "en"
-      ? "(※ Guidance only. You must submit the return/refund request directly on the platform.)"
-      : "(※ 안내만 가능하며, 실제 환불/반품은 해당 플랫폼에서 직접 진행하셔야 합니다.)");
+const DISCLOSURE = {
+  ko: "(※ 안내만 가능하며, 실제 환불/반품은 해당 플랫폼에서 직접 진행하셔야 합니다.)",
+  en: "(※ Guidance only. You must submit the return/refund request directly on the platform.)"
+};
 
-  const lines = [];
+// ---- Guards (헌법 기반) ----
 
-  // (A) State declaration
-  lines.push(renderStateDeclaration({ lang, state_id, category }));
-
-  // (B) State body
-  if (state_id === "S1_MIN_FACTS_REQUEST") {
-    // Minimal facts request (no generalities)
-    const factsNeeded = Array.isArray(input?.facts_needed) ? input.facts_needed : [];
-    if (factsNeeded.length === 0) {
-      throw new Error("facts_needed required for S1_MIN_FACTS_REQUEST");
-    }
-
-    lines.push(""); // spacer
-    lines.push(lang === "en" ? "To make an accurate decision, please share only:" : "정확한 판단을 위해 아래만 알려주세요:");
-    lines.push(...factsNeeded.map((t) => `• ${String(t)}`));
-    lines.push("");
-    lines.push(lang === "en" ? "Once confirmed, I’ll tell you whether it’s eligible and what to do next." : "확인되는 즉시 가능 여부를 판단해 드리겠습니다.");
-  } else if (state_id === "S2_PRESENT_CHOICES") {
-    // Present up to 2 choices (Day-4 constraint)
-    const choices = Array.isArray(input?.choices) ? input.choices : [];
-    if (choices.length === 0) throw new Error("choices required for S2_PRESENT_CHOICES");
-    if (choices.length > 2) throw new Error("choices must be <= 2 for Day-4 renderer");
-
-    lines.push("");
-    lines.push(lang === "en" ? "Choose one:" : "다음 중 선택해 주세요:");
-    choices.forEach((c, idx) => {
-      const title = String(c?.title || "");
-      if (!title) throw new Error("each choice.title is required");
-      lines.push(`${idx + 1}. ${title}`);
-    });
-  } else {
-    throw new Error(`Unknown state_id: ${state_id}`);
+function assertNoGateWords(text) {
+  const banned = [/gate\s*\d*/i, /게이트/];
+  for (const rx of banned) {
+    if (rx.test(text)) throw new Error("Gate word leak detected");
   }
-
-  // (C) Non-Negotiable disclosure (always)
-  lines.push("");
-  lines.push(disclosure);
-
-  const text = lines.join("\n").trim();
-
-  // Safety checks: never leak internal words
-  assertNoGateWords(text);
-
-  return { text, state_id, lang };
 }
+
+// “일반론/정책용어”를 최소 수준으로만 막는다 (지나친 필터링 금지)
+function assertNoGeneralities(text) {
+  // 예: "보통", "대체로", "일반적으로" 같은 말은 LCM 스타일 위반
+  const banned = [/보통/g, /대체로/g, /일반적으로/g, /generally/gi, /usually/gi];
+  for (const rx of banned) {
+    if (rx.test(text)) throw new Error("Generality detected");
+  }
+}
+
+// ---- Core renderers ----
 
 function renderStateDeclaration({ lang, state_id, category }) {
   const map = lang === "en" ? EN_STATE_DECLARATIONS : KO_STATE_DECLARATIONS;
@@ -84,15 +51,132 @@ function renderStateDeclaration({ lang, state_id, category }) {
   return tpl.replace("{category}", category);
 }
 
-function assertNoGateWords(text) {
-  // "Gate", "게이트", "Gate 2" 등 내부 단어 금지
-  const banned = [/gate\s*\d*/i, /게이트/];
-  for (const rx of banned) {
-    if (rx.test(text)) throw new Error("Gate word leak detected");
+function renderFactsRequest({ lang, facts }) {
+  // facts: [{ key, ko, en }]
+  if (!Array.isArray(facts) || facts.length === 0) {
+    throw new Error("facts_required must be a non-empty array in S1_MIN_FACTS_REQUEST");
   }
+
+  if (lang === "en") {
+    return [
+      "To verify, please share only:",
+      ...facts.map((f) => `• ${f.en}`),
+      "Once confirmed, I’ll 판단 and propose the next step."
+    ];
+  }
+
+  return [
+    "정확한 판단을 위해 아래만 알려주세요:",
+    ...facts.map((f) => `• ${f.ko}`),
+    "확인되는 즉시 가능 여부를 판단해 드리겠습니다."
+  ];
+}
+
+function normalizeChoices({ choices, max = 2 }) {
+  // Day-4 헌법/validator 기준: choices는 최대 2개 (과다 선택지 금지)
+  if (!Array.isArray(choices) || choices.length === 0) {
+    throw new Error("choices must be a non-empty array in S2_PRESENT_CHOICES");
+  }
+  if (choices.length > max) throw new Error("choices > 2 not allowed in Day-4 renderer");
+  return choices;
+}
+
+function renderChoices({ lang, choices }) {
+  const c = normalizeChoices({ choices, max: 2 });
+
+  if (lang === "en") {
+    return [
+      "Choose one:",
+      ...c.map((x, i) => `${i + 1}. ${x.title}`),
+      "Reply with 1 or 2."
+    ];
+  }
+
+  return [
+    "다음 중 하나를 선택해 주세요:",
+    ...c.map((x, i) => `${i + 1}. ${x.title}`),
+    "원하시는 번호(1 또는 2)를 알려주세요."
+  ];
+}
+
+function renderErrorHandling({ lang }) {
+  if (lang === "en") {
+    return [
+      "Example: “I bought it on Apr 1 and it’s unopened.”",
+      "Please tell me again in that format."
+    ];
+  }
+  return [
+    "예: “구매일은 4월 1일이고, 아직 개봉 안 했어요”",
+    "이 형식으로 다시 알려주시겠어요?"
+  ];
+}
+
+function renderWait({ lang, state_id }) {
+  // 상태에 따라 대기 문장만 아주 미세 조정
+  if (lang === "en") {
+    if (state_id === "S1_MIN_FACTS_REQUEST") return ["When you're ready, reply with those details."];
+    if (state_id === "S2_PRESENT_CHOICES") return ["When you're ready, reply with 1 or 2."];
+    return ["When you're ready, reply with the details."];
+  }
+  if (state_id === "S1_MIN_FACTS_REQUEST") return ["준비되시면 위 정보를 알려주세요."];
+  if (state_id === "S2_PRESENT_CHOICES") return ["준비되시면 번호(1 또는 2)를 알려주세요."];
+  return ["준비되시면 정보를 알려주세요."];
+}
+
+// ---- Golden Sequence orchestrator ----
+
+function renderGoldenSequence(input) {
+  const { lang, state_id, category_text } = input;
+  const category = category_text || (lang === "en" ? "this item" : "해당 상품");
+
+  const lines = [];
+
+  // Step 1 — state declaration
+  lines.push(renderStateDeclaration({ lang, state_id, category }));
+  lines.push("");
+
+  // Step 2 — state-driven body
+  if (state_id === "S1_MIN_FACTS_REQUEST") {
+    lines.push(...renderFactsRequest({ lang, facts: input.facts_required }));
+  } else if (state_id === "S2_PRESENT_CHOICES") {
+    lines.push(...renderChoices({ lang, choices: input.choices }));
+  } else if (state_id === "S_ERROR_HANDLING") {
+    lines.push(...renderErrorHandling({ lang }));
+  } else {
+    throw new Error(`Unsupported state_id: ${state_id}`);
+  }
+
+  // Step 3 — disclosure (always)
+  lines.push("");
+  lines.push(DISCLOSURE[lang] || DISCLOSURE.ko);
+
+  // Step 4 — wait
+  lines.push(...renderWait({ lang, state_id }));
+
+  const text = lines.join("\n").trim();
+
+  // Guards
+  assertNoGateWords(text);
+  assertNoGeneralities(text);
+
+  return { text, state_id, lang };
+}
+
+// Backward compatible API name
+function renderFirstResponse(input) {
+  return renderGoldenSequence(input);
 }
 
 module.exports = {
   renderFirstResponse,
-  _internal: { renderStateDeclaration, assertNoGateWords }
+  renderGoldenSequence,
+  _internal: {
+    renderStateDeclaration,
+    renderFactsRequest,
+    renderChoices,
+    normalizeChoices,
+    assertNoGateWords,
+    assertNoGeneralities
+  }
 };
