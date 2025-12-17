@@ -1,27 +1,66 @@
 {
   "version": "first_response.v1",
-  "copy": {
+
+  "state_declarations": {
     "ko": {
-      "state_declaration": {
-        "S1_MIN_FACTS_REQUEST": "{category} 환불·반품을 도와드리겠습니다.",
-        "S2_PRESENT_CHOICES": "{category} 환불·반품 진행 방식을 선택해 주세요."
-      },
-      "facts_intro": "정확한 판단을 위해 아래만 알려주세요:",
-      "facts_outro": "확인되는 즉시 가능 여부를 판단해 드리겠습니다.",
-      "choices_intro": "다음 중 하나를 선택해 주세요:",
-      "choice_line": "{n}. {title}",
-      "wait_prompt": "준비되시면 {hint} 알려주세요."
+      "S1_MIN_FACTS_REQUEST": "{category} 환불·반품을 도와드리겠습니다.",
+      "S2_PRESENT_CHOICES": "{category} 환불·반품 진행 방식을 선택해 주세요.",
+      "S_ERROR_HANDLING": "정확한 판단을 위해 정보가 조금 더 필요합니다.",
+      "DEFAULT": "요청을 확인했습니다."
     },
     "en": {
-      "state_declaration": {
-        "S1_MIN_FACTS_REQUEST": "I can help with {category} refunds/returns.",
-        "S2_PRESENT_CHOICES": "Choose how you'd like to proceed for {category}."
-      },
-      "facts_intro": "To make an accurate decision, please share only:",
-      "facts_outro": "Once confirmed, I’ll determine eligibility right away.",
-      "choices_intro": "Please choose one option:",
-      "choice_line": "{n}. {title}",
-      "wait_prompt": "When ready, please provide {hint}."
+      "S1_MIN_FACTS_REQUEST": "I can help with your {category} return/refund request.",
+      "S2_PRESENT_CHOICES": "Please choose how you'd like to proceed for {category} return/refund.",
+      "S_ERROR_HANDLING": "I need a bit more information to make an accurate decision.",
+      "DEFAULT": "Got it. I’ve noted your request."
+    }
+  },
+
+  "facts_request": {
+    "ko": {
+      "intro": "정확한 판단을 위해 아래만 알려주세요:",
+      "outro": "확인되는 즉시 가능 여부를 판단해 드리겠습니다."
+    },
+    "en": {
+      "intro": "To make an accurate decision, please share only:",
+      "outro": "Once confirmed, I’ll determine eligibility right away."
+    }
+  },
+
+  "choices": {
+    "ko": {
+      "header": "다음 중 하나를 선택해 주세요:",
+      "prompt": "원하시는 번호(1 또는 2)를 알려주세요."
+    },
+    "en": {
+      "header": "Please choose one:",
+      "prompt": "Reply with 1 or 2."
+    }
+  },
+
+  "non_negotiable": {
+    "nnr_line": {
+      "ko": "※ 저는 환불/반품을 대신 신청하거나 승인할 수 없습니다.",
+      "en": "※ I can’t submit or approve refunds/returns on your behalf."
+    },
+    "disclosure": {
+      "ko": "(※ 안내만 가능하며, 실제 환불/반품은 해당 플랫폼에서 직접 진행하셔야 합니다.)",
+      "en": "(※ Guidance only. You must submit the return/refund request directly on the platform.)"
+    }
+  },
+
+  "wait_prompt": {
+    "ko": {
+      "S1_MIN_FACTS_REQUEST": "준비되시면 위 정보를 알려주세요.",
+      "S2_PRESENT_CHOICES": "준비되시면 번호(1 또는 2)를 알려주세요.",
+      "S_ERROR_HANDLING": "준비되시면 상황을 한 문장으로 다시 알려주세요.",
+      "DEFAULT": "준비되시면 다음 정보를 알려주세요."
+    },
+    "en": {
+      "S1_MIN_FACTS_REQUEST": "When ready, share the info above.",
+      "S2_PRESENT_CHOICES": "When ready, reply with 1 or 2.",
+      "S_ERROR_HANDLING": "When ready, describe your situation in one sentence.",
+      "DEFAULT": "When ready, share the next detail."
     }
   }
 }

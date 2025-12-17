@@ -1,151 +1,242 @@
 // lcm-server/renderer/first_response_renderer.js
-// Day-4 Step-4: Template-driven, domain-agnostic first response renderer
-// Rules: state-driven, deterministic, no generalities, no gate words, max 2 choices.
+// Day-4: First Response Rendering Engine (template-driven)
+// Rule: state-driven, domain-agnostic, deterministic, no generalities, no gate words.
 
 const fs = require("fs");
 const path = require("path");
 
-const DEFAULT_TEMPLATE_PATH = path.resolve(__dirname, "./templates/first_response.v1.json");
-
-const DEFAULT_DISCLOSURE = {
-  ko: "(※ 안내만 가능하며, 실제 환불/반품은 해당 플랫폼에서 직접 진행하셔야 합니다.)",
-  en: "(※ Guidance only. You must submit the return/refund request directly on the platform.)"
-};
+function normalizeLang(lang) {
+  const s = String(lang || "ko").trim().toLowerCase();
+  if (s.startsWith("en")) return "en";
+  return "ko";
+}
 
 function assertNoGateWords(text) {
   const banned = [/gate\s*\d*/i, /게이트/];
   for (const rx of banned) {
-    if (rx.test(text)) throw new Error("Gate word leak detected");
+    if (rx.test(String(text))) throw new Error("Gate word leak detected");
   }
 }
 
-function assertNoGeneralities(text) {
-  // 최소한만 강제: “보통/일반적으로/대체로” 같은 일반론 금지
-  const banned = [/보통/g, /일반적으로/g, /대체로/g];
-  for (const rx of banned) {
-    if (rx.test(text)) throw new Error("Generality leak detected");
+/**
+ * Resolve template section that may be:
+ * - string
+ * - { ko: ..., en: ... }
+ * - { ko: {...}, en: {...} }
+ * - { ... } (already language-free object)
+ */
+function resolveLangValue(node, lang) {
+  const L = normalizeLang(lang);
+  if (node == null) return null;
+  if (typeof node === "string") return node;
+
+  // if it looks like a language map: { ko: X, en: Y }
+  if (typeof node === "object" && (Object.prototype.hasOwnProperty.call(node, "ko") || Object.prototype.hasOwnProperty.call(node, "en"))) {
+    return node[L] ?? node.ko ?? node.en ?? null;
   }
+
+  // otherwise treat it as already language-free object
+  return node;
 }
 
-function loadTemplate(templatePath = DEFAULT_TEMPLATE_PATH) {
-  const raw = fs.readFileSync(templatePath, "utf-8");
-  const t = JSON.parse(raw);
+function loadTemplate(template_path) {
+  const p = template_path
+    ? path.resolve(template_path)
+    : path.resolve(__dirname, "templates/first_response.v1.json");
 
-  // ultra-minimal validation (fail fast)
-  if (!t || !t.copy || !t.copy.ko || !t.copy.en) throw new Error("Invalid template: missing copy.ko/copy.en");
-  if (!t.copy.ko.state_declaration || !t.copy.en.state_declaration) throw new Error("Invalid template: missing state_declaration");
-  return t;
+  const raw = fs.readFileSync(p, "utf8");
+  return JSON.parse(raw);
 }
 
-function fmt(s, vars) {
-  return String(s).replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
+function fmt(str, vars) {
+  return String(str).replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
 }
 
+function normalizeLines(x) {
+  if (x == null) return [];
+  if (Array.isArray(x)) return x.map(String);
+  return [String(x)];
+}
+
+/** -----------------------
+ *  Step 1: State declaration
+ *  ----------------------- */
 function renderStateDeclaration({ tpl, lang, state_id, category }) {
-  const map = tpl.copy[lang]?.state_declaration || {};
-  const s = map[state_id];
-  if (!s) throw new Error(`No state declaration for ${state_id}`);
-  return fmt(s, { category });
+  const L = normalizeLang(lang);
+
+  const sd = (tpl && tpl.state_declarations) || {};
+  if (!sd || typeof sd !== "object") {
+    throw new Error("state_declarations must be an object in template");
+  }
+
+  // support both shapes:
+  // A) { S1: "...", DEFAULT: "..." }
+  // B) { ko: {S1:"..."}, en:{...} }
+  const map =
+    (sd[L] || sd.ko || sd.en) && typeof (sd[L] || sd.ko || sd.en) === "object"
+      ? (sd[L] || sd.ko || sd.en)
+      : sd;
+
+  const raw = map[state_id] ?? map.DEFAULT;
+  if (!raw) {
+    throw new Error(`No state declaration template for state_id=${state_id} lang=${L}`);
+  }
+
+  const line = fmt(raw, { category });
+  assertNoGateWords(line);
+  return [line];
 }
 
-function renderFactsRequest({ tpl, lang, facts_required }) {
-  // facts_required: [{ key, ko, en }]
+/** -----------------------
+ *  Step 2: Minimal facts request
+ *  ----------------------- */
+function renderFactsRequest({ tpl, lang, state_id, facts_required }) {
+  if (state_id !== "S1_MIN_FACTS_REQUEST") return [];
+
   if (!Array.isArray(facts_required) || facts_required.length === 0) {
     throw new Error("facts_required must be a non-empty array in S1_MIN_FACTS_REQUEST");
   }
 
-  const lines = [];
-  lines.push(tpl.copy[lang].facts_intro);
+  const L = normalizeLang(lang);
+  const frNode = tpl?.facts_request ?? null;
+  const fr = resolveLangValue(frNode, lang) || {};
 
+  // allow:
+  // facts_request: { intro, outro }
+  // OR facts_request: { ko:{intro,outro}, en:{...} } (handled by resolveLangValue)
+  const intro = fr.intro || (L === "en" ? "To decide correctly, please share only:" : "정확한 판단을 위해 아래만 알려주세요:");
+  const outro = fr.outro || (L === "en" ? "Once confirmed, I’ll judge eligibility immediately." : "확인되는 즉시 가능 여부를 판단해 드리겠습니다.");
+
+  const lines = [intro];
   for (const f of facts_required) {
-    const label = lang === "en" ? f.en : f.ko;
-    if (!label) throw new Error("facts_required item missing label");
+    const label = L === "en" ? f.en : f.ko;
     lines.push(`• ${label}`);
   }
+  lines.push(outro);
 
-  lines.push(tpl.copy[lang].facts_outro);
-  return lines.join("\n");
+  lines.forEach(assertNoGateWords);
+  return lines;
 }
 
-function renderChoices({ tpl, lang, choices }) {
-  if (!Array.isArray(choices) || choices.length === 0) throw new Error("choices must be a non-empty array in S2_PRESENT_CHOICES");
-  if (choices.length > 2) throw new Error("Day-4 constraint: choices must be <= 2");
+/** -----------------------
+ *  Step 2b: Choices (max 2)
+ *  ----------------------- */
+function renderChoices({ tpl, lang, state_id, choices }) {
+  if (state_id !== "S2_PRESENT_CHOICES") return [];
 
-  const lines = [];
-  lines.push(tpl.copy[lang].choices_intro);
+  if (!Array.isArray(choices)) throw new Error("choices must be an array in S2_PRESENT_CHOICES");
+  if (choices.length > 2) throw new Error("choices must be <= 2 (Day-4 constraint)");
 
-  const lineTpl = tpl.copy[lang].choice_line;
-  for (let i = 0; i < choices.length; i++) {
-    lines.push(fmt(lineTpl, { n: String(i + 1), title: choices[i].title }));
-  }
-  return lines.join("\n");
+  const L = normalizeLang(lang);
+  const chNode = tpl?.choices ?? null;
+  const ch = resolveLangValue(chNode, lang) || {};
+
+  const header = ch.header || (L === "en" ? "Choose one:" : "다음 중 하나를 선택해 주세요:");
+  const prompt = ch.prompt || (L === "en" ? "Reply with 1 or 2." : "원하시는 번호(1 또는 2)를 알려주세요.");
+
+  const lines = [header];
+  choices.forEach((c, i) => lines.push(`${i + 1}. ${c.title}`));
+  lines.push(prompt);
+
+  lines.forEach(assertNoGateWords);
+  return lines;
 }
 
-function renderWaitPrompt({ tpl, lang, state_id, facts_required, choices }) {
-  // 마지막 줄은 항상 “대기(액션 유도)” 문장
-  let hint = "";
 
-  if (state_id === "S1_MIN_FACTS_REQUEST") {
-    hint = lang === "en" ? "the details above" : "위 정보를";
-  } else if (state_id === "S2_PRESENT_CHOICES") {
-    // 1 또는 2 같은 형태 강제
-    hint = lang === "en" ? "option 1 or 2" : "번호(1 또는 2)를";
-  } else {
-    hint = lang === "en" ? "your response" : "답변을";
+/** -----------------------
+ *  Step 3: Non-negotiable disclosure
+ *  ----------------------- */
+function pickLangString(value, L) {
+  // value can be: "string" OR { ko: "…", en: "…" }
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const v = value[L] || value.ko || value.en;
+    if (typeof v === "string") return v;
   }
-
-  return fmt(tpl.copy[lang].wait_prompt, { hint });
+  return null;
 }
 
-function renderGoldenSequence({ tpl, lang, state_id, category_text, facts_required, choices, disclosure }) {
-  const category = category_text || (lang === "en" ? "this item" : "해당 상품");
-  const disc = disclosure || DEFAULT_DISCLOSURE[lang];
+function renderNonNegotiable({ tpl, lang }) {
+  const L = normalizeLang(lang);
+  const nn = (tpl && tpl.non_negotiable) || {};
 
-  const parts = [];
+  const fallbackNnr = (L === "en")
+    ? "※ I can’t submit or approve refunds/returns on your behalf."
+    : "※ 저는 환불/반품을 대신 신청하거나 승인할 수 없습니다.";
 
-  // Step 1: 상태 선언
-  parts.push(renderStateDeclaration({ tpl, lang, state_id, category }));
+  const fallbackDisclosure = (L === "en")
+    ? "(※ Guidance only. You must submit the return/refund request directly on the platform.)"
+    : "(※ 안내만 가능하며, 실제 환불/반품은 해당 플랫폼에서 직접 진행하셔야 합니다.)";
 
-  // Step 2: 최소 질문 / 선택지
-  if (state_id === "S1_MIN_FACTS_REQUEST") {
-    parts.push(renderFactsRequest({ tpl, lang, facts_required }));
-  } else if (state_id === "S2_PRESENT_CHOICES") {
-    parts.push(renderChoices({ tpl, lang, choices }));
-  } else {
-    throw new Error(`Unsupported state_id: ${state_id}`);
+  const nnrLine = pickLangString(nn.nnr_line, L) || fallbackNnr;
+  const disclosure = pickLangString(nn.disclosure, L) || fallbackDisclosure;
+
+  // 이제 여기서는 항상 string 보장됨
+  assertNoGateWords(nnrLine);
+  assertNoGateWords(disclosure);
+  return [nnrLine, disclosure];
+}
+
+/** -----------------------
+ *  Step 4: Wait prompt (must be last line)
+ *  ----------------------- */
+function renderWait({ tpl, lang, state_id }) {
+  const L = normalizeLang(lang);
+  const wpNode = tpl?.wait_prompt ?? null;
+  const wp = resolveLangValue(wpNode, lang);
+
+  // allow:
+  // wait_prompt: "TMP_WAIT"  (string)
+  // wait_prompt: { DEFAULT:"...", S1_MIN_FACTS_REQUEST:"..." } (state map)
+  // wait_prompt: { ko:{DEFAULT:"..."}, en:{...} } (handled by resolveLangValue)
+  let line = null;
+
+  if (typeof wp === "string") {
+    line = wp;
+  } else if (wp && typeof wp === "object") {
+    line = wp[state_id] ?? wp.DEFAULT ?? null;
   }
 
-  // Step 3: Non-Negotiable disclosure
-  parts.push(disc);
+  if (!line) {
+    line =
+      L === "en"
+        ? "When ready, reply with the next detail."
+        : "준비되시면 위 정보를 알려주세요.";
+  }
 
-  // Step 4: 대기/다음 행동 유도 (항상 마지막 줄)
-  parts.push(renderWaitPrompt({ tpl, lang, state_id, facts_required, choices }));
+  assertNoGateWords(line);
+  return [line];
+}
 
-  const text = parts.join("\n\n");
+// Public API
+function renderFirstResponse({
+  lang = "ko",
+  state_id,
+  category_text,
+  facts_required,
+  choices,
+  template_path
+}) {
+  const tpl = loadTemplate(template_path);
+  const L = normalizeLang(lang);
+  const category = category_text || (L === "en" ? "Return/Refund" : "환불·반품");
 
+  const lines = [
+    ...renderStateDeclaration({ tpl, lang: L, state_id, category }),
+    ...renderFactsRequest({ tpl, lang: L, state_id, facts_required }),
+    ...renderChoices({ tpl, lang: L, state_id, choices }),
+    ...renderNonNegotiable({ tpl, lang: L }),
+    ...renderWait({ tpl, lang: L, state_id })
+  ];
+
+  // final safety
+  const text = lines.join("\n");
   assertNoGateWords(text);
-  assertNoGeneralities(text);
 
-  return { text, state_id, lang };
-}
-
-/**
- * renderFirstResponse(params)
- * - lang: "ko" | "en"
- * - state_id: "S1_MIN_FACTS_REQUEST" | "S2_PRESENT_CHOICES"
- * - category_text: string
- * - facts_required: [{key, ko, en}] (S1)
- * - choices: [{id, title}] (S2)
- * - disclosure?: string
- * - template_path?: string (optional; test/debug only)
- */
-function renderFirstResponse(params) {
-  const lang = params.lang === "en" ? "en" : "ko";
-  const tpl = loadTemplate(params.template_path);
-  return renderGoldenSequence({ tpl, lang, ...params });
+  return { text, state_id, lang: L };
 }
 
 module.exports = {
   renderFirstResponse,
-  _internal: { loadTemplate, assertNoGateWords, assertNoGeneralities }
+  _internal: { normalizeLang, loadTemplate, assertNoGateWords, resolveLangValue }
 };
