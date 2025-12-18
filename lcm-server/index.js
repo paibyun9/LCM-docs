@@ -1,65 +1,43 @@
 // lcm-server/index.js
-// Engine-level Single Exit Gate (no HTTP/res)
-// All outward results MUST pass through Guard.
-
 const { enforceGuard } = require("./gate/enforce_guard");
 const { renderFirstResponse } = require("./renderer/first_response_renderer");
+const { generateStep2Options } = require("./step2/step2_options_generator");
 
-/**
- * Extract user message from input in a tolerant way.
- * (So Guard can always see the true user intent.)
- */
-function extractUserMessage(input) {
-  if (!input) return "";
-  if (typeof input === "string") return input;
-
-  // common keys
-  return String(
-    input.user_message ??
-      input.userMessage ??
-      input.message ??
-      input.text ??
-      input.query ??
-      ""
-  ).trim();
-}
-
-/**
- * Produce First Response with enforced Guard.
- * Returns a stable response object suitable for SDK/CLI/server wrappers.
- *
- * input: whatever your renderer expects
- * ctx: { route, request_id, user_id, ... } (optional)
- * lang: "ko" | "en"
- */
-async function produceFirstResponse({ input, ctx = {}, lang = "ko" }) {
-  // 1) draft 생성
-  const draft = await renderFirstResponse(input, lang);
-
-  // 2) Guard가 사용자 의도를 볼 수 있게 ctx에 user_message를 강제 주입
+async function produceFirstResponse({ input = {}, ctx = {}, lang = "ko" } = {}) {
+  // ctx에 user_message 주입 (guard/exit-gate 판단용)
   const mergedCtx = {
     ...ctx,
-    user_message: extractUserMessage(input),
+    user_message: input?.user_message,
   };
 
-  // 3) 단일 Exit Gate 강제 통과
-  const decision = await enforceGuard({ draft, ctx: mergedCtx, lang });
+  // 1) draft 생성
+  const draft = await renderFirstResponse(input);
 
-  // 4) blocked면 차단 응답 반환 (표준 포맷)
-  if (decision?.blocked) {
+  // 2) 단일 Guard/Exit 경로 통과
+  const decision = await enforceGuard({
+    draft,
+    ctx: mergedCtx,
+    lang,
+  });
+
+  // 3) blocked면 표준 포맷 반환
+  if (decision.blocked) {
     return {
       ok: false,
       blocked: true,
-      reason_code: decision.reason_code || null,
-      message: decision.message || "I can’t help with that request.",
+      reason_code: decision.reason_code,
+      message: decision.message,
     };
   }
 
-  // 5) 통과면 결과 반환
+  // 4) Step 2 옵션 (항상 3개)
+  const step2 = generateStep2Options({ ctx: mergedCtx, lang });
+
   return {
     ok: true,
     blocked: false,
-    result: decision?.output ?? draft,
+    result: decision.output ?? draft,
+    step2,
   };
 }
 

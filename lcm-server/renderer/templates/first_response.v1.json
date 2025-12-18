@@ -1,6 +1,17 @@
 {
   "version": "first_response.v1",
 
+  "warm_open": {
+    "ko": {
+      "DEFAULT": "혼란스러울 수 있는 상황입니다.",
+      "ALT_1": "당황스러우실 수 있습니다."
+    },
+    "en": {
+      "DEFAULT": "This situation can be confusing.",
+      "ALT_1": "This can be frustrating."
+    }
+  },
+
   "state_declarations": {
     "ko": {
       "S1_MIN_FACTS_REQUEST": "{category} 환불·반품을 도와드리겠습니다.",
