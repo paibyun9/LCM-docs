@@ -5,3 +5,18 @@ package-lock.json
 
 # Validator temp files
 tools/validator/tmp.*.json
+
+# local / temp
+tmp.input.json
+tmp.output.json
+nohup.out
+
+# personal notes
+LCM_TREE_*.md
+roadmap.json
+
+# scripts
+update_snapshot.sh
+
+# gate prototype (if not ready to track yet)
+lcm-server/gate/exit_gate.js
